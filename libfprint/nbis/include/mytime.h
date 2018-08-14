@@ -42,56 +42,65 @@ of the software.
 *******************************************************************************/
 
 
-#ifndef _SUNRAST_H
-#define _SUNRAST_H
+#ifndef _MYTIME_H
+#define _MYTIME_H
 
-/************************************************************/
-/*         File Name: Sunrast.h                             */
-/*         Package:   Sun Rasterfile I/O                    */
-/*         Author:    Michael D. Garris                     */
-/*         Date:      8/19/99                               */
-/*         Updated:   03/16/2005 by MDG                     */
-/*                                                          */
-/************************************************************/
+/* this file needed to support timer and ticks */
+/* UPDATED: 03/16/2005 by MDG */
 
-/* Contains header information related to Sun Rasterfile images. */
+#ifdef TIMER
+#include <sys/types.h>
+#endif
 
-typedef struct sunrasterhdr {
-	int	magic;		/* magic number */
-	int	width;		/* width (in pixels) of image */
-	int	height;		/* height (in pixels) of image */
-	int	depth;		/* depth (1, 8, or 24 bits) of pixel */
-	int	raslength;	/* length (in bytes) of image */
-	int	rastype;	/* type of file; see SUN_* below */
-	int	maptype;	/* type of colormap; see MAP_* below */
-	int	maplength;	/* length (bytes) of following map */
-	/* color map follows for maplength bytes, followed by image */
-} SUNHEAD;
+#ifdef __MSYS__
+#include <sys/time.h>
+#else
+#include <sys/times.h>
+#endif
 
-#define	SUN_MAGIC	0x59a66a95
+#ifdef TIMER
+#define set_timer(_timer_); \
+   {  \
+      _timer_ = ticks();
+#else
+#define set_timer(_timer_);
+#endif
 
-	/* Sun supported ras_type's */
-#define SUN_STANDARD	1	/* Raw pixrect image in 68000 byte order */
-#define SUN_RUN_LENGTH	2	/* Run-length compression of bytes */
-#define SUN_FORMAT_RGB	3	/* XRGB or RGB instead of XBGR or BGR */
-#define SUN_FORMAT_TIFF	4	/* tiff <-> standard rasterfile */
-#define SUN_FORMAT_IFF	5	/* iff (TAAC format) <-> standard rasterfile */
+#ifdef TIMER
+#define time_accum(_timer_, _var_); \
+      _var_ += (ticks() - _timer_)/(float)ticksPerSec(); \
+   }
+#else
+#define time_accum(_timer_, _var_);
+#endif
 
-	/* Sun supported maptype's */
-#define MAP_RAW		2
-#define MAP_NONE	0	/* maplength is expected to be 0 */
-#define MAP_EQUAL_RGB	1	/* red[maplength/3],green[],blue[] */
+#ifdef TIMER
+#define print_time(_fp_, _fmt_, _var_); \
+    fprintf(_fp_, _fmt_, _var_);
+#else
+#define print_time(_fp_, _fmt_, _var_);
+#endif
 
-/*
- * NOTES:
- *   Each line of a bitmap image should be rounded out to a multiple
- *   of 16 bits.
- */
+extern clock_t ticks(void);
+extern int ticksPerSec(void);
 
-/* sunrast.c */
-extern int ReadSunRaster(const char *, SUNHEAD **, unsigned char **, int *,
-                         unsigned char **, int *, int *, int *, int *);
-extern int WriteSunRaster(char *, unsigned char *, const int, const int,
-                         const int);
+extern clock_t total_timer;
+extern float total_time;
+
+extern clock_t imap_timer;
+extern float imap_time;
+
+extern clock_t bin_timer;
+extern float bin_time;
+
+extern clock_t minutia_timer;
+extern float minutia_time;
+
+extern clock_t rm_minutia_timer;
+extern float rm_minutia_time;
+
+extern clock_t ridge_count_timer;
+extern float ridge_count_time;
 
 #endif
+

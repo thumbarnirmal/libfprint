@@ -305,7 +305,8 @@ static int fpi_img_detect_minutiae(struct fp_img *img)
 	}
 
 	/* Remove perimeter points from partial image */
-	g_lfsparms_V2.remove_perimeter_pts = img->flags & FP_IMG_PARTIAL ? TRUE : FALSE;
+	//FIXME
+	//g_lfsparms_V2.remove_perimeter_pts = img->flags & FP_IMG_PARTIAL ? TRUE : FALSE;
 
 	/* 25.4 mm per inch */
 	timer = g_timer_new();

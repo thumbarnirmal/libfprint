@@ -1,25 +1,46 @@
 /*******************************************************************************
 
 License: 
-This software was developed at the National Institute of Standards and 
-Technology (NIST) by employees of the Federal Government in the course 
-of their official duties. Pursuant to title 17 Section 105 of the 
-United States Code, this software is not subject to copyright protection 
-and is in the public domain. NIST assumes no responsibility  whatsoever for 
-its use by other parties, and makes no guarantees, expressed or implied, 
-about its quality, reliability, or any other characteristic. 
+This software and/or related materials was developed at the National Institute
+of Standards and Technology (NIST) by employees of the Federal Government
+in the course of their official duties. Pursuant to title 17 Section 105
+of the United States Code, this software is not subject to copyright
+protection and is in the public domain. 
+
+This software and/or related materials have been determined to be not subject
+to the EAR (see Part 734.3 of the EAR for exact details) because it is
+a publicly available technology and software, and is freely distributed
+to any interested party with no licensing requirements.  Therefore, it is 
+permissible to distribute this software as a free download from the internet.
 
 Disclaimer: 
-This software was developed to promote biometric standards and biometric
-technology testing for the Federal Government in accordance with the USA
-PATRIOT Act and the Enhanced Border Security and Visa Entry Reform Act.
-Specific hardware and software products identified in this software were used
-in order to perform the software development.  In no case does such
-identification imply recommendation or endorsement by the National Institute
-of Standards and Technology, nor does it imply that the products and equipment
-identified are necessarily the best available for the purpose.  
+This software and/or related materials was developed to promote biometric
+standards and biometric technology testing for the Federal Government
+in accordance with the USA PATRIOT Act and the Enhanced Border Security
+and Visa Entry Reform Act. Specific hardware and software products identified
+in this software were used in order to perform the software development.
+In no case does such identification imply recommendation or endorsement
+by the National Institute of Standards and Technology, nor does it imply that
+the products and equipment identified are necessarily the best available
+for the purpose.
+
+This software and/or related materials are provided "AS-IS" without warranty
+of any kind including NO WARRANTY OF PERFORMANCE, MERCHANTABILITY,
+NO WARRANTY OF NON-INFRINGEMENT OF ANY 3RD PARTY INTELLECTUAL PROPERTY
+or FITNESS FOR A PARTICULAR PURPOSE or for any purpose whatsoever, for the
+licensed product, however used. In no event shall NIST be liable for any
+damages and/or costs, including but not limited to incidental or consequential
+damages of any kind, including economic damage or injury to property and lost
+profits, regardless of whether NIST shall be advised, have reason to know,
+or in fact shall know of the possibility.
+
+By using this software, you agree to bear all risk relating to quality,
+use and performance of the software and/or related materials.  You agree
+to hold the Government harmless from any claim arising from your use
+of the software.
 
 *******************************************************************************/
+
 
 /***********************************************************************
       LIBRARY: LFS - NIST Latent Fingerprint System
@@ -46,6 +67,7 @@ identified are necessarily the best available for the purpose.
                         pixelize_map()
                         smooth_direction_map()
                         gen_high_curve_map()
+                        gen_imap()
                         gen_initial_imap()
                         primary_dir_test()
                         secondary_fork_test()
@@ -58,6 +80,7 @@ identified are necessarily the best available for the purpose.
                         average_8nbr_dir()
                         num_valid_8nbrs()
                         smooth_imap()
+                        gen_nmap()
                         vorticity()
                         accum_nbr_vorticity()
                         curvature()
@@ -65,8 +88,6 @@ identified are necessarily the best available for the purpose.
 ***********************************************************************/
 
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <lfs.h>
 #include <morph.h>
 #include <log.h>
@@ -306,10 +327,6 @@ int gen_initial_maps(int **odmap, int **olcmap, int **olfmap,
    yminlimit = dftgrids->pad;
    xmaxlimit = pw - dftgrids->pad - lfsparms->windowsize - 1;
    ymaxlimit = ph - dftgrids->pad - lfsparms->windowsize - 1;
-
-   /* max limits should not be negative */
-   xmaxlimit = MAX(xmaxlimit, 0);
-   ymaxlimit = MAX(ymaxlimit, 0);
 
    /* Foreach block in image ... */
    for(bi = 0; bi < bsize; bi++){
@@ -929,6 +946,75 @@ int gen_high_curve_map(int **ohcmap, int *direction_map,
    *ohcmap = high_curve_map;
 
    /* Return normally. */
+   return(0);
+}
+
+/*************************************************************************
+**************************************************************************
+#cat: gen_imap - Computes an IMAP, which is a 2D vector of integer directions,
+#cat:            where each direction represents the dominant ridge flow in
+#cat:            a block of the input grayscale image.  This routine will
+#cat:            generate an IMAP for arbitrarily sized, non-square, images.
+
+   Input:
+      pdata     - padded input image data (8 bits [0..256) grayscale)
+      pw        - padded width (in pixels) of the input image
+      ph        - padded height (in pixels) of the input image
+      dir2rad   - lookup table for converting integer directions
+      dftwaves  - structure containing the DFT wave forms
+      dftgrids  - structure containing the rotated pixel grid offsets
+      lfsparms  - parameters and thresholds for controlling LFS
+   Output:
+      optr      - points to the created IMAP
+      ow        - width (in blocks) of the IMAP
+      oh        - height (in blocks) of the IMAP
+   Return Code:
+      Zero     - successful completion
+      Negative - system error
+**************************************************************************/
+int gen_imap(int **optr, int *ow, int *oh,
+              unsigned char *pdata, const int pw, const int ph,
+              const DIR2RAD *dir2rad, const DFTWAVES *dftwaves,
+              const ROTGRIDS *dftgrids, const LFSPARMS *lfsparms)
+{
+   int *imap, mw, mh, iw, ih;
+   int *blkoffs;
+   int ret; /* return code */
+
+   /* 1. Compute block offsets for the entire image, accounting for pad */
+   /* Block_offsets() assumes square block (grid), so ERROR otherwise. */
+   if(dftgrids->grid_w != dftgrids->grid_h){
+      fprintf(stderr, "ERROR : gen_imap : DFT grids must be square\n");
+      return(-60);
+   }
+   /* Compute unpadded image dimensions. */
+   iw = pw - (dftgrids->pad<<1);
+   ih = ph - (dftgrids->pad<<1);
+   if((ret = block_offsets(&blkoffs, &mw, &mh, iw, ih,
+                 dftgrids->pad, dftgrids->grid_w))){
+      return(ret);
+   }
+
+   /* 2. Generate initial imap */
+   if((ret = gen_initial_imap(&imap, blkoffs, mw, mh, pdata, pw, ph,
+                           dftwaves, dftgrids, lfsparms))){
+      /* Free memory allocated to this point. */
+      free(blkoffs);
+      return(ret);
+   }
+
+   /* 3. Remove IMAP directions that are inconsistent with neighbors */
+   remove_incon_dirs(imap, mw, mh, dir2rad, lfsparms);
+
+   /* 4. Smooth imap values with their neighbors */
+   smooth_imap(imap, mw, mh, dir2rad, lfsparms);
+
+   /* Deallocate working memory. */
+   free(blkoffs);
+
+   *optr = imap;
+   *ow = mw;
+   *oh = mh;
    return(0);
 }
 
@@ -2091,6 +2177,100 @@ void smooth_imap(int *imap, const int mw, const int mh,
          iptr++;
       }
    }
+}
+
+/*************************************************************************
+**************************************************************************
+#cat: gen_nmap - Computes an NMAP from its associated 2D vector of integer
+#cat:            directions (IMAP).  Each value in the NMAP either represents
+#cat:            a direction of dominant ridge flow in a block of the input
+#cat:            grayscale image, or it contains a codes describing why such
+#cat:            a direction was not procuded.
+#cat:            For example, blocks near areas of high-curvature (such as
+#cat:            with cores and deltas) will not produce reliable IMAP
+#cat:            directions.
+
+   Input:
+      imap      - associated input vector of IMAP directions
+      mw        - the width (in blocks) of the IMAP
+      mh        - the height (in blocks) of the IMAP
+      lfsparms  - parameters and thresholds for controlling LFS
+   Output:
+      optr      - points to the created NMAP
+   Return Code:
+      Zero     - successful completion
+      Negative - system error
+**************************************************************************/
+int gen_nmap(int **optr, int *imap, const int mw, const int mh,
+             const LFSPARMS *lfsparms)
+{
+   int *nmap, mapsize;
+   int *nptr, *iptr;
+   int bx, by;
+   int nvalid, cmeasure, vmeasure;
+
+   mapsize = mw*mh;
+   nmap = (int *)malloc(mapsize * sizeof(int));
+   if(nmap == (int *)NULL){
+      fprintf(stderr, "ERROR: gen_nmap : malloc : nmap\n");
+      return(-120);
+   }
+
+   nptr = nmap;
+   iptr = imap;
+   /* Foreach row in IMAP ... */
+   for(by = 0; by < mh; by++){
+      /* Foreach column in IMAP ... */
+      for(bx = 0; bx < mw; bx++){
+         /* Count number of valid neighbors around current block ... */
+         nvalid = num_valid_8nbrs(imap, bx, by, mw, mh);
+         /* If block has no valid neighbors ... */
+         if(nvalid == 0)
+            /* Set NMAP value to NO VALID NEIGHBORS */
+            *nptr = NO_VALID_NBRS;
+         else{
+            /* If current IMAP value is INVALID ... */
+            if(*iptr == INVALID_DIR){
+               /* If not enough VALID neighbors ... */
+               if(nvalid < lfsparms->vort_valid_nbr_min){
+                  /* Set NMAP value to INVALID */
+                  *nptr = INVALID_DIR;
+               }
+               else{
+                  /* Otherwise measure vorticity of neighbors. */
+                  vmeasure = vorticity(imap, bx, by, mw, mh,
+                                       lfsparms->num_directions);
+                  /* If vorticity too low ... */
+                  if(vmeasure < lfsparms->highcurv_vorticity_min)
+                     *nptr = INVALID_DIR;
+                  else
+                     /* Otherwise high-curvature area (Ex. core or delta). */
+                     *nptr = HIGH_CURVATURE;
+               }
+            }
+            /* Otherwise VALID IMAP value ... */
+            else{
+               /* Measure curvature around the VALID IMAP block. */
+               cmeasure = curvature(imap, bx, by, mw, mh,
+                                    lfsparms->num_directions);
+               /* If curvature is too high ... */
+               if(cmeasure >= lfsparms->highcurv_curvature_min)
+                  *nptr = HIGH_CURVATURE;
+               else
+                  /* Otherwise acceptable amount of curature, so assign */
+                  /* VALID IMAP value to NMAP.                          */
+                  *nptr = *iptr;
+            }
+         } /* end else (nvalid > 0) */
+         /* BUMP IMAP and NMAP pointers. */
+         iptr++;
+         nptr++;
+
+      } /* bx */
+   } /* by */
+         
+   *optr = nmap;
+   return(0);
 }
 
 /*************************************************************************

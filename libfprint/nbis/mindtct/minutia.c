@@ -1,25 +1,46 @@
 /*******************************************************************************
 
 License: 
-This software was developed at the National Institute of Standards and 
-Technology (NIST) by employees of the Federal Government in the course 
-of their official duties. Pursuant to title 17 Section 105 of the 
-United States Code, this software is not subject to copyright protection 
-and is in the public domain. NIST assumes no responsibility  whatsoever for 
-its use by other parties, and makes no guarantees, expressed or implied, 
-about its quality, reliability, or any other characteristic. 
+This software and/or related materials was developed at the National Institute
+of Standards and Technology (NIST) by employees of the Federal Government
+in the course of their official duties. Pursuant to title 17 Section 105
+of the United States Code, this software is not subject to copyright
+protection and is in the public domain. 
+
+This software and/or related materials have been determined to be not subject
+to the EAR (see Part 734.3 of the EAR for exact details) because it is
+a publicly available technology and software, and is freely distributed
+to any interested party with no licensing requirements.  Therefore, it is 
+permissible to distribute this software as a free download from the internet.
 
 Disclaimer: 
-This software was developed to promote biometric standards and biometric
-technology testing for the Federal Government in accordance with the USA
-PATRIOT Act and the Enhanced Border Security and Visa Entry Reform Act.
-Specific hardware and software products identified in this software were used
-in order to perform the software development.  In no case does such
-identification imply recommendation or endorsement by the National Institute
-of Standards and Technology, nor does it imply that the products and equipment
-identified are necessarily the best available for the purpose.  
+This software and/or related materials was developed to promote biometric
+standards and biometric technology testing for the Federal Government
+in accordance with the USA PATRIOT Act and the Enhanced Border Security
+and Visa Entry Reform Act. Specific hardware and software products identified
+in this software were used in order to perform the software development.
+In no case does such identification imply recommendation or endorsement
+by the National Institute of Standards and Technology, nor does it imply that
+the products and equipment identified are necessarily the best available
+for the purpose.
+
+This software and/or related materials are provided "AS-IS" without warranty
+of any kind including NO WARRANTY OF PERFORMANCE, MERCHANTABILITY,
+NO WARRANTY OF NON-INFRINGEMENT OF ANY 3RD PARTY INTELLECTUAL PROPERTY
+or FITNESS FOR A PARTICULAR PURPOSE or for any purpose whatsoever, for the
+licensed product, however used. In no event shall NIST be liable for any
+damages and/or costs, including but not limited to incidental or consequential
+damages of any kind, including economic damage or injury to property and lost
+profits, regardless of whether NIST shall be advised, have reason to know,
+or in fact shall know of the possibility.
+
+By using this software, you agree to bear all risk relating to quality,
+use and performance of the software and/or related materials.  You agree
+to hold the Government harmless from any claim arising from your use
+of the software.
 
 *******************************************************************************/
+
 
 /***********************************************************************
       LIBRARY: LFS - NIST Latent Fingerprint System
@@ -37,6 +58,7 @@ identified are necessarily the best available for the purpose.
                ROUTINES:
                         alloc_minutiae()
                         realloc_minutiae()
+                        detect_minutiae()
                         detect_minutiae_V2()
                         update_minutiae()
                         update_minutiae_V2()
@@ -73,15 +95,11 @@ identified are necessarily the best available for the purpose.
                         adjust_high_curvature_minutia()
                         adjust_high_curvature_minutia_V2()
                         get_low_curvature_direction()
-                        lfs2nist_minutia_XYT()
 
 ***********************************************************************/
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <lfs.h>
-
-
 
 /*************************************************************************
 **************************************************************************
@@ -143,6 +161,99 @@ int realloc_minutiae(MINUTIAE *minutiae, const int incr_minutiae)
       exit(-432);
    }
 
+   return(0);
+}
+
+/*************************************************************************
+**************************************************************************
+#cat: detect_minutiae - Takes a binary image and its associated IMAP and
+#cat:            NMAP matrices and scans each image block for potential
+#cat:            minutia points.
+
+   Input:
+      bdata     - binary image data (0==while & 1==black)
+      iw        - width (in pixels) of image
+      ih        - height (in pixels) of image
+      imap      - matrix of ridge flow directions
+      nmap      - IMAP augmented with blocks of HIGH-CURVATURE and
+                  blocks which have no neighboring valid directions.
+      mw        - width (in blocks) of IMAP and NMAP matrices.
+      mh        - height (in blocks) of IMAP and NMAP matrices.
+      lfsparms  - parameters and thresholds for controlling LFS
+   Output:
+      minutiae   - points to a list of detected minutia structures
+   Return Code:
+      Zero      - successful completion
+      Negative  - system error
+**************************************************************************/
+int detect_minutiae(MINUTIAE *minutiae,
+            unsigned char *bdata, const int iw, const int ih,
+            const int *imap, const int *nmap, const int mw, const int mh,
+            const LFSPARMS *lfsparms)
+{
+   int blk_i, blk_x, blk_y;
+   int scan_x, scan_y, scan_w, scan_h;
+   int scan_dir;
+   int ret;
+
+   /* Start with first block in IMAP. */
+   blk_i = 0;
+
+   /* Start with first scan line in image. */
+   scan_y = 0;
+
+   /* Foreach row of blocks in IMAP... */
+   for(blk_y = 0; blk_y < mh; blk_y++){
+      /* Reset to beginning of new block row. */
+      scan_x = 0;
+      /* Foreach block in current IMAP row... */
+      for(blk_x = 0; blk_x < mw; blk_x++){
+
+         /* If IMAP is VALID ... */
+         if(imap[blk_i] != INVALID_DIR){
+            /* Choose the feature scan direction based on the block's */
+            /* VALID IMAP direction. The scan direction will either   */
+            /* be HORIZONTAL or VERTICAL.                             */
+            scan_dir = choose_scan_direction(imap[blk_i],
+                                             lfsparms->num_directions);
+            /* Set width of scan region.  The image may not be an even */
+            /* multiple of "blocksize" in width and height, so we must */
+            /* account for this.                                       */
+            /* Bump right by "blocksize" pixels, but not beyond the    */
+            /* image boundary.                                         */
+            scan_w = min(scan_x+lfsparms->blocksize, iw);
+            /* Make the resulting width relative to the region's starting */
+            /* x-pixel column.                                            */
+            scan_w -= scan_x;
+            /* Bump down by "blocksize" pixels, but not beyond the     */
+            /* image boundary.                                         */
+            scan_h = min(scan_y+lfsparms->blocksize, ih);
+            /* Make the resulting height relative to the region's starting */
+            /* y-pixel row.                                                */
+            scan_h -= scan_y;
+            /* Scan the defined region for minutia features. */
+            if((ret = scan4minutiae(minutiae, bdata, iw, ih,
+                                   imap, nmap, blk_x, blk_y, mw, mh,
+                                   scan_x, scan_y, scan_w, scan_h, scan_dir,
+                                   lfsparms))){
+               /* Return code may be:                      */
+               /* 1. ret<0 (implying system error)         */
+               return(ret);
+            }
+
+         } /* Otherwise, IMAP is INVALID, so ignore the block.  This seems */
+           /* quite drastic!                                               */
+
+         /* Advance to the next IMAP block in the row in the image. */
+         scan_x += lfsparms->blocksize;
+         /* Advance to the next IMAP block in the row. */
+         blk_i++;
+      } /* End foreach blk_x */
+      /* Advance to the next IMAP row in the image. */
+      scan_y += lfsparms->blocksize;
+   } /* End foreach blk_y */
+
+   /* Return normally. */
    return(0);
 }
 
@@ -3462,50 +3573,5 @@ int get_low_curvature_direction(const int scan_dir, const int appearing,
 
    /* Return resulting direction on range [0..31]. */
    return(idir);
-}
-
-/*************************************************************************
-**************************************************************************
-#cat: lfs2nist_minutia_XYT - Converts XYT minutiae attributes in LFS native
-#cat:        representation to NIST internal representation
-
-   Input:
-      minutia  - LFS minutia structure containing attributes to be converted
-   Output:
-      ox       - NIST internal based x-pixel coordinate
-      oy       - NIST internal based y-pixel coordinate
-      ot       - NIST internal based minutia direction/orientation
-   Return Code:
-      Zero     - successful completion
-      Negative - system error
-**************************************************************************/
-void lfs2nist_minutia_XYT(int *ox, int *oy, int *ot,
-                          const MINUTIA *minutia, const int iw, const int ih)
-{
-   int x, y, t;
-   float degrees_per_unit;
-
-   /*       XYT's according to NIST internal rep:           */
-    /*      1. pixel coordinates with origin bottom-left    */
-   /*       2. orientation in degrees on range [0..360]     */
-   /*          with 0 pointing east and increasing counter  */
-   /*          clockwise (same as M1)                       */
-   /*       3. direction pointing out and away from the     */
-   /*             ridge ending or bifurcation valley        */
-   /*             (opposite direction from M1)              */
-
-   x = minutia->x;
-   y = ih - minutia->y;
-
-   degrees_per_unit = 180 / (float)NUM_DIRECTIONS;
-
-   t = (270 - sround(minutia->direction * degrees_per_unit)) % 360;
-   if(t < 0){
-      t += 360;
-   }
-
-   *ox = x;
-   *oy = y;
-   *ot = t;
 }
 
